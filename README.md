@@ -15,11 +15,12 @@ The architecture operates on a master-worker model, managed through SSH and SFTP
 2. **Server Configuration**: 
    The application uses a pool of external servers configured via the Admin panel. These instances have Python 3 installed. The `FROM_EMAIL` references in `.env` (like `bnhgmfxbjx@1254975.cloudwaysapps.com`) are linked to these Cloudways worker servers used for SMTP handshakes.
 
-3. **Delegating the Work (Laravel `RunPythonScriptService`)**:
-   - The Laravel application (`Admin\SSHService.php`) connects to a chosen worker server via SFTP and moves the Python verification script (`email_validation_org.py`) into the remote environment.
-   - It checks the SSH connection and ensures a Python virtual environment is set up.
-   - Laravel executes the script in the background over SSH using a command similar to:
-     `nohup python3 email_validation_script.py <host> <user> <password> <database> <task_id> > /dev/null &`
+3. **Delegating the Work via SSH and SFTP**:
+   The external connections are explicitly triggered and managed by a specific set of Laravel classes using the `phpseclib3` package:
+   - `app/Services/Admin/SSHService.php`: This is the core communication wrapper utilizing `phpseclib3\Net\SSH2` and `phpseclib3\Net\SFTP`. It exposes low-level methods like `executeSSHCommand()` and `executeSFTP()`.
+   - `app/Http/Controllers/Admin/ServerDetailController.php`: When an admin configures a new worker server via the dashboard, this controller invokes `SSHService->executeSFTP()` to actively push the Python script onto the remote machine. It also runs pre-flight SSH checks (`test -d ~/venv/bin/` and `nc -zv`) to ensure a Python virtual environment exists and the worker server can communicate back to the master MySQL database.
+   - `app/Services/RunPythonScriptService.php`: When a background email task begins, this service selects an available remote instance. It invokes `SSHService->executeSSHCommand()` to spawn the Python process asynchronously without waiting for it to finish, using:
+     `nohup /usr/bin/python3 ~/path/email_validation_script.py <host> <user> <password> <database> <task_id> <appUrl> <statusFlag> > /dev/null 2>&1 &`
 
 4. **Remote Execution (The Python Script)**:
    - The Python script running on the remote instance receives the central database credentials as command-line arguments.
